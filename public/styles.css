@@ -252,3 +252,7 @@ table.tbl tr:last-child td { border-bottom: none; }
 .confirm-list .cf { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f5f6f8; font-size: 13px; }
 .confirm-list .cf.read { color: var(--success); }
 .confirm-list .cf.unread { color: var(--text-soft); }
+
+.pk-row { padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: .15s; font-size: 13px; }
+.pk-row:hover { border-color: var(--primary); background: var(--primary-soft); }
+.ai-row input, .ai-row select { font-size: 13px; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }

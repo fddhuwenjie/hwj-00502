@@ -1,6 +1,6 @@
 const express = require('express');
 const { db } = require('../db');
-const { enrichMeeting } = require('../helpers');
+const { enrichMeeting, renderMinutesTemplate, parseJsonArray, touchTemplate } = require('../helpers');
 
 const router = express.Router();
 
@@ -38,7 +38,7 @@ router.get('/:id', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { title, type, start_time, end_time, location, host_id, agenda, attendee_ids, copy_from } = req.body;
+  const { title, type, start_time, end_time, location, host_id, agenda, attendee_ids, copy_from, template_id } = req.body;
   if (!title || !type || !start_time) {
     return res.status(400).json({ error: '标题、类型、开始时间为必填项' });
   }
@@ -47,14 +47,30 @@ router.post('/', (req, res) => {
     const src = db.prepare(`SELECT agenda FROM meetings WHERE id=?`).get(copy_from);
     if (src) finalAgenda = src.agenda || finalAgenda;
   }
-  const r = db.prepare(`INSERT INTO meetings (title,type,start_time,end_time,location,host_id,agenda,status) VALUES (?,?,?,?,?,?,?,'planned')`)
-    .run(title, type, start_time, end_time || start_time, location || '', host_id || null, finalAgenda);
+  const r = db.prepare(`INSERT INTO meetings (title,type,start_time,end_time,location,host_id,agenda,status,template_id,recurring_rule_id) VALUES (?,?,?,?,?,?,?,'planned',?,NULL)`)
+    .run(title, type, start_time, end_time || start_time, location || '', host_id || null, finalAgenda, template_id || null);
   const meetingId = r.lastInsertRowid;
   const ids = Array.isArray(attendee_ids) ? attendee_ids : [];
   const ins = db.prepare(`INSERT OR IGNORE INTO meeting_attendees (meeting_id,user_id) VALUES (?,?)`);
   ids.forEach(uid => ins.run(meetingId, uid));
-  const minutes = db.prepare(`INSERT INTO minutes (meeting_id,content) VALUES (?,?)`).run(meetingId, '');
-  res.status(201).json({ id: meetingId, minutes_id: minutes.lastInsertRowid });
+
+  let minutesContent = '';
+  let createdActionItems = 0;
+  if (template_id) {
+    const tpl = db.prepare(`SELECT * FROM meeting_templates WHERE id=?`).get(template_id);
+    if (tpl) {
+      minutesContent = renderMinutesTemplate(tpl, { title, start_time });
+      const items = parseJsonArray(tpl.default_action_items);
+      const insItem = db.prepare(`INSERT INTO action_items (meeting_id,title,owner_id,due_date,priority,status,progress) VALUES (?,?,?,?,?,?,?)`);
+      items.forEach(it => {
+        insItem.run(meetingId, it.title || '', it.owner_id || null, it.due_date || null, it.priority || '中', it.status || '待开始', it.progress || 0);
+      });
+      createdActionItems = items.length;
+      touchTemplate(template_id);
+    }
+  }
+  const minutes = db.prepare(`INSERT INTO minutes (meeting_id,content) VALUES (?,?)`).run(meetingId, minutesContent);
+  res.status(201).json({ id: meetingId, minutes_id: minutes.lastInsertRowid, template_id: template_id || null, action_items_created: createdActionItems });
 });
 
 router.put('/:id', (req, res) => {

@@ -7,6 +7,13 @@ const PRIORITIES = ['高', '中', '低'];
 const STATUSES = ['待开始', '进行中', '已完成', '延期', '取消'];
 const TYPE_COLOR = { '周会': '#4f6df5', '评审': '#f08c00', '复盘': '#0ca678', '客户会议': '#d6336c', '临时会议': '#7048e8' };
 const STATUS_COLOR = { '待开始': '#adb5bd', '进行中': '#4f6df5', '已完成': '#0ca678', '延期': '#e03131', '取消': '#868e96' };
+const RECURRENCE_FREQUENCIES = [
+  { value: 'weekly', label: '每周（指定星期）' },
+  { value: 'biweekly', label: '每两周一次' },
+  { value: 'monthly', label: '每月（指定日期）' },
+  { value: 'monthly_first_workday', label: '每月第一个工作日' }
+];
+const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
 const app = document.getElementById('app');
 const modalRoot = document.getElementById('modalRoot');
@@ -143,6 +150,11 @@ async function route() {
       else if (rest[0]) await viewMeetingDetail(rest[0]);
       else await viewMeetings();
     }
+    else if (view === 'templates') {
+      if (rest[0] === 'new') await viewTemplateForm(null);
+      else if (rest[0]) await viewTemplateDetail(rest[0]);
+      else await viewTemplates();
+    }
     else if (view === 'actions') {
       if (rest[0]) await viewActionDetail(rest[0]);
       else await viewActions();
@@ -261,7 +273,9 @@ async function viewMeetingForm(id) {
     m = await api('/meetings/' + id);
     m.attendees = (m.attendees || []).map(a => a.id);
   }
+  let selectedTemplateId = m.template_id || null;
   openModal(id ? '编辑会议' : '新建会议', `
+    <div class="form-row"><label>从模板填充 <span class="muted" style="font-weight:400">（选择后一键填充，保存时生成纪要初稿与默认行动项）</span></label><select id="mTemplate"><option value="">不使用模板</option></select></div>
     <div class="form-row"><label>会议标题 *</label><input id="mTitle" value="${escapeHtml(m.title)}" placeholder="如：产品周会-第26周" /></div>
     <div class="form-grid">
       <div class="form-row"><label>会议类型 *</label><select id="mType">${MEETING_TYPES.map(t => `<option ${m.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
@@ -277,6 +291,23 @@ async function viewMeetingForm(id) {
       <textarea id="mAgenda" rows="5" placeholder="1. 议题一&#10;2. 议题二">${escapeHtml(m.agenda)}</textarea>
     </div>
   `, `<button class="btn" data-close="1">取消</button><button class="btn primary" id="saveMeeting">保存</button>`, 'lg');
+  (async () => {
+    const tpls = await api('/templates');
+    const sel = document.getElementById('mTemplate');
+    sel.innerHTML = `<option value="">不使用模板</option>` + tpls.map(t => `<option value="${t.id}" ${selectedTemplateId === t.id ? 'selected' : ''}>${escapeHtml(t.name)}（${t.type}）</option>`).join('');
+  })();
+  document.getElementById('mTemplate').onchange = async () => {
+    const tid = Number(mTemplate.value);
+    if (!tid) { selectedTemplateId = null; return; }
+    const t = await api('/templates/' + tid);
+    selectedTemplateId = tid;
+    mType.value = t.type;
+    mHost.value = t.host_id || '';
+    mLoc.value = t.location || '';
+    mAgenda.value = t.agenda || '';
+    document.querySelectorAll('#mAttendees input').forEach(c => { c.checked = (t.attendees || []).some(a => a.id === Number(c.value)); });
+    toast('已套用模板「' + t.name + '」，保存后将生成纪要初稿与默认行动项');
+  };
   document.getElementById('copyAgenda').onclick = async () => {
     const type = document.getElementById('mType').value;
     const last = await api('/meetings/types/' + encodeURIComponent(type) + '/last');
@@ -289,11 +320,12 @@ async function viewMeetingForm(id) {
       start_time: mStart.value.replace('T', ' '), end_time: mEnd.value.replace('T', ' '),
       location: mLoc.value, host_id: Number(mHost.value) || null,
       agenda: mAgenda.value,
-      attendee_ids: [...document.querySelectorAll('#mAttendees input:checked')].map(c => Number(c.value))
+      attendee_ids: [...document.querySelectorAll('#mAttendees input:checked')].map(c => Number(c.value)),
+      template_id: selectedTemplateId
     };
     try {
       if (id) { await api('/meetings/' + id, { method: 'PUT', body }); toast('会议已更新', 'success'); }
-      else { await api('/meetings', { method: 'POST', body }); toast('会议已创建', 'success'); }
+      else { const r = await api('/meetings', { method: 'POST', body }); toast(r.action_items_created ? `会议已创建，已生成 ${r.action_items_created} 条默认行动项` : '会议已创建', 'success'); }
       closeModal(); location.hash = '#/meetings';
     } catch (e) { toast(e.message, 'error'); }
   };
@@ -324,10 +356,10 @@ async function viewMeetingDetail(id) {
             <textarea class="md-editor" id="mdArea">${escapeHtml(minutes.content)}</textarea>
           </div>
           <div id="mdPreview" class="md-preview" hidden>${renderMarkdown(minutes.content)}</div>
-          <div class="row" style="margin-top:12px"><button class="btn" id="saveDraft">保存草稿</button>${!isPublished ? '<button class="btn primary" id="publishBtn">发布纪要</button>' : ''}</div>
+          <div class="row" style="margin-top:12px"><button class="btn" id="saveDraft">保存草稿</button><button class="btn" id="mdFromTpl">📋 从模板生成纪要初稿</button>${!isPublished ? '<button class="btn primary" id="publishBtn">发布纪要</button>' : ''}</div>
         </div>
         <div class="card">
-          <div class="card-title">关联行动项 <span class="actions"><button class="btn sm primary" id="addAction">+ 从纪要创建行动项</button></span></div>
+          <div class="card-title">关联行动项 <span class="actions"><button class="btn sm" id="aiFromTpl">从模板生成默认行动项</button><button class="btn sm primary" id="addAction">+ 从纪要创建行动项</button></span></div>
           <div id="mActions"><div class="empty">加载中…</div></div>
         </div>
       </div>
@@ -387,6 +419,20 @@ async function viewMeetingDetail(id) {
   };
   document.getElementById('editMeeting').onclick = () => viewMeetingForm(id);
   document.getElementById('addAction').onclick = () => actionForm(null, id);
+  document.getElementById('mdFromTpl').onclick = () => {
+    pickTemplateModal('从模板生成纪要初稿', async (tid) => {
+      const r = await api('/templates/' + tid + '/minutes-draft', { method: 'POST', body: { title: m.title, date: (m.start_time || '').slice(0, 10) } });
+      mdArea.value = r.content;
+      mdContent = r.content;
+      toast('已生成纪要初稿，请点击「保存草稿」', 'success');
+    });
+  };
+  document.getElementById('aiFromTpl').onclick = () => {
+    pickTemplateModal('从模板生成默认行动项', async (tid) => {
+      const r = await api('/templates/' + tid + '/default-action-items', { method: 'POST', body: { meeting_id: id } });
+      toast('已生成 ' + r.created + ' 条默认行动项', 'success'); loadMeetingActions(id);
+    });
+  };
 }
 
 async function loadMeetingActions(meetingId) {
@@ -695,6 +741,201 @@ document.getElementById('notifBtn').onclick = async () => {
     setTimeout(() => { document.getElementById('notifDot').hidden = true; }, 1500);
   }
 };
+
+/* ---------- templates ---------- */
+let templatesFilters = { type: '', keyword: '' };
+async function viewTemplates() {
+  app.innerHTML = `<div class="page-head">
+      <div><h1 class="page-title">会议模板</h1><p class="page-desc">创建会议模板与周期规则，一键生成会议、纪要初稿与默认行动项</p></div>
+      <button class="btn primary" onclick="location.hash='#/templates/new'">+ 新建模板</button>
+    </div>
+    <div class="toolbar">
+      <select id="tType"><option value="">全部类型</option>${MEETING_TYPES.map(t => `<option ${templatesFilters.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <input id="tKw" placeholder="搜索模板名称/议程/纪要模板" value="${escapeHtml(templatesFilters.keyword)}" style="flex:1;max-width:300px" />
+      <button class="btn primary" id="tGo">搜索</button>
+    </div>
+    <div class="card"><div id="tList"><div class="empty">加载中…</div></div></div>`;
+  const go = async () => {
+    templatesFilters = { type: tType.value, keyword: tKw.value };
+    const qs = new URLSearchParams();
+    if (templatesFilters.type) qs.set('type', templatesFilters.type);
+    if (templatesFilters.keyword) qs.set('keyword', templatesFilters.keyword);
+    const list = await api('/templates?' + qs.toString());
+    document.getElementById('tList').innerHTML = list.length ? `<table class="tbl">
+      <thead><tr><th>模板名称</th><th>类型</th><th>默认主持人</th><th>参会人</th><th>已生成会议</th><th>最近使用</th><th>操作</th></tr></thead>
+      <tbody>${list.map(t => `<tr>
+        <td onclick="location.hash='#/templates/${t.id}'" style="cursor:pointer"><strong>${escapeHtml(t.name)}</strong></td>
+        <td>${typeBadge(t.type)}</td>
+        <td>${t.host ? escapeHtml(t.host.name) : '-'}</td>
+        <td>${avatars(t.attendees)}</td>
+        <td>${t.meeting_count}</td>
+        <td>${t.last_used_at ? fmtDate(t.last_used_at) : '<span class="muted">未使用</span>'}</td>
+        <td><div class="row" style="gap:6px;flex-wrap:nowrap">
+          <button class="btn sm primary" onclick="quickGenMeeting(${t.id})">生成会议</button>
+          <button class="btn sm" onclick="recurringModal(${t.id})">周期生成</button>
+          <button class="btn sm danger" onclick="delTemplate(${t.id})">删除</button>
+        </div></td>
+      </tr>`).join('')}</tbody></table>` : `<div class="empty"><div class="big">📭</div>暂无模板，点击右上角新建</div>`;
+  };
+  document.getElementById('tGo').onclick = go; go();
+}
+
+async function viewTemplateDetail(id) {
+  app.innerHTML = `<div id="td"><div class="empty">加载中…</div></div>`;
+  const t = await api('/templates/' + id);
+  const all = await api('/meetings');
+  const meetings = all.filter(m => m.template_id === Number(id));
+  document.getElementById('td').innerHTML = `
+    <div class="page-head">
+      <div><h1 class="page-title">${escapeHtml(t.name)}</h1><div class="row wrap">${typeBadge(t.type)} <span class="muted">默认时长 ${t.duration_minutes || 60} 分钟</span></div></div>
+      <div class="row"><button class="btn" onclick="location.hash='#/templates'">返回</button><button class="btn" onclick="viewTemplateForm(${id})">✏️ 编辑</button><button class="btn primary" onclick="quickGenMeeting(${id})">生成单次会议</button><button class="btn primary" onclick="recurringModal(${id})">配置周期生成</button></div>
+    </div>
+    <div class="detail-layout">
+      <div>
+        <div class="card">
+          <div class="card-title">纪要 Markdown 模板预览</div>
+          <div class="md-preview">${renderMarkdown(t.minutes_template)}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">默认行动项清单</div>
+          ${t.default_action_items.length ? `<table class="tbl"><thead><tr><th>标题</th><th>负责人</th><th>优先级</th></tr></thead><tbody>${t.default_action_items.map(i => `<tr><td>${escapeHtml(i.title)}</td><td>${i.owner_id ? escapeHtml((USERS.find(u => u.id === i.owner_id) || {}).name || '-') : '-'}</td><td>${priorityBadge(i.priority)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">无默认行动项</div>'}
+        </div>
+        <div class="card">
+          <div class="card-title">已生成会议（${meetings.length}）</div>
+          ${meetings.length ? `<table class="tbl"><thead><tr><th>标题</th><th>时间</th><th>状态</th></tr></thead><tbody>${meetings.map(m => `<tr onclick="location.hash='#/meetings/${m.id}'"><td>${escapeHtml(m.title)}</td><td>${fmtDate(m.start_time)}</td><td>${m.minutes && m.minutes.published_at ? '已发布' : '草稿'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">尚未生成会议</div>'}
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-title">模板信息</div>
+          <div class="kv"><span class="k">主持人</span>${t.host ? avatar(t.host) + ' ' + escapeHtml(t.host.name) : '-'}</div>
+          <div class="kv"><span class="k">地点</span>${escapeHtml(t.location || '-')}</div>
+          <div class="kv"><span class="k">参会人</span>${avatars(t.attendees)}</div>
+          <div class="kv"><span class="k">最近使用</span>${t.last_used_at ? fmtDate(t.last_used_at) : '未使用'}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">固定议程</div>
+          <pre style="white-space:pre-wrap;font-family:inherit;background:#f8fafc;padding:10px;border-radius:8px;font-size:12px">${escapeHtml(t.agenda || '（无）')}</pre>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function viewTemplateForm(id) {
+  let t = { name: '', type: '周会', host_id: ME?.id, location: '', agenda: '', minutes_template: '', default_action_items: [], duration_minutes: 60, attendees: [] };
+  if (id) {
+    t = await api('/templates/' + id);
+    t.attendees = (t.attendees || []).map(a => a.id);
+  }
+  let items = (t.default_action_items || []).map(i => ({ title: i.title || '', owner_id: i.owner_id || null, priority: i.priority || '中' }));
+  const renderItems = () => {
+    document.getElementById('tiList').innerHTML = items.length ? items.map((it, idx) => `<div class="row ai-row" style="gap:6px;margin-bottom:6px;align-items:center">
+      <input class="ti-title" value="${escapeHtml(it.title)}" placeholder="行动项标题" style="flex:1" />
+      <select class="ti-owner" style="max-width:130px"><option value="">负责人</option>${USERS.map(u => `<option value="${u.id}" ${it.owner_id === u.id ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}</select>
+      <select class="ti-pri" style="max-width:90px">${PRIORITIES.map(p => `<option ${it.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>
+      <button class="btn sm danger" data-idx="${idx}">✕</button>
+    </div>`).join('') : '<div class="muted" style="font-size:12px">暂无默认行动项</div>';
+    document.querySelectorAll('#tiList .ai-row button[data-idx]').forEach(b => b.onclick = () => { items.splice(Number(b.dataset.idx), 1); renderItems(); });
+  };
+  openModal(id ? '编辑模板' : '新建模板', `
+    <div class="form-row"><label>模板名称 *</label><input id="tpName" value="${escapeHtml(t.name)}" placeholder="如：产品周会模板" /></div>
+    <div class="form-grid">
+      <div class="form-row"><label>会议类型 *</label><select id="tpType">${MEETING_TYPES.map(tt => `<option ${t.type === tt ? 'selected' : ''}>${tt}</option>`).join('')}</select></div>
+      <div class="form-row"><label>默认主持人</label><select id="tpHost"><option value="">请选择</option>${USERS.map(u => `<option value="${u.id}" ${t.host_id === u.id ? 'selected' : ''}>${escapeHtml(u.name)}（${escapeHtml(u.role)}）</option>`).join('')}</select></div>
+    </div>
+    <div class="form-grid">
+      <div class="form-row"><label>默认地点 / 线上链接</label><input id="tpLoc" value="${escapeHtml(t.location)}" /></div>
+      <div class="form-row"><label>默认时长（分钟）</label><input id="tpDur" type="number" min="5" value="${t.duration_minutes || 60}" /></div>
+    </div>
+    <div class="form-row"><label>默认参会人</label><div class="form-checks" id="tpAttendees">${USERS.map(u => `<label><input type="checkbox" value="${u.id}" ${t.attendees.includes(u.id) ? 'checked' : ''} /> ${escapeHtml(u.name)}</label>`).join('')}</div></div>
+    <div class="form-row"><label>固定议程</label><textarea id="tpAgenda" rows="4" placeholder="1. 议题一&#10;2. 议题二">${escapeHtml(t.agenda)}</textarea></div>
+    <div class="form-row"><label>纪要 Markdown 模板 <span class="muted" style="font-weight:400">（支持 {{title}} {{date}} {{host}} 占位符）</span></label><textarea id="tpMd" rows="6" placeholder="# {{title}}&#10;&#10;## 一、议题">${escapeHtml(t.minutes_template)}</textarea></div>
+    <div class="form-row"><label>默认行动项清单 <button type="button" class="btn sm" id="tiAdd">+ 添加</button></label><div id="tiList"></div></div>
+  `, `<button class="btn" data-close="1">取消</button><button class="btn primary" id="tpSave">保存</button>`, 'lg');
+  renderItems();
+  document.getElementById('tiAdd').onclick = () => { items.push({ title: '', owner_id: null, priority: '中' }); renderItems(); };
+  document.getElementById('tpSave').onclick = async () => {
+    const rows = document.querySelectorAll('#tiList .ai-row');
+    const collected = [...rows].map(r => ({ title: r.querySelector('.ti-title').value.trim(), owner_id: Number(r.querySelector('.ti-owner').value) || null, priority: r.querySelector('.ti-pri').value })).filter(i => i.title);
+    const body = {
+      name: tpName.value.trim(), type: tpType.value, host_id: Number(tpHost.value) || null,
+      location: tpLoc.value, agenda: tpAgenda.value, minutes_template: tpMd.value,
+      duration_minutes: Number(tpDur.value) || 60,
+      attendee_ids: [...document.querySelectorAll('#tpAttendees input:checked')].map(c => Number(c.value)),
+      default_action_items: collected
+    };
+    if (!body.name || !body.type) return toast('模板名称与类型为必填', 'error');
+    try {
+      if (id) { await api('/templates/' + id, { method: 'PUT', body }); toast('模板已更新', 'success'); }
+      else { await api('/templates', { method: 'POST', body }); toast('模板已创建', 'success'); }
+      closeModal(); location.hash = '#/templates';
+    } catch (e) { toast(e.message, 'error'); }
+  };
+}
+
+function quickGenMeeting(id) {
+  const now = new Date(); now.setMinutes(0, 0, 0);
+  const def = now.toISOString().slice(0, 16);
+  openModal('从模板生成会议', `
+    <div class="form-row"><label>开始时间 *</label><input id="gmStart" type="datetime-local" value="${def}" /></div>
+    <div class="form-row"><label>会议标题 <span class="muted" style="font-weight:400">（留空则用 模板名+日期）</span></label><input id="gmTitle" placeholder="如：产品周会-第27周" /></div>
+  `, `<button class="btn" data-close="1">取消</button><button class="btn primary" id="gmGo">生成</button>`);
+  document.getElementById('gmGo').onclick = async () => {
+    if (!gmStart.value) return toast('请选择开始时间', 'error');
+    try {
+      const r = await api('/templates/' + id + '/generate-meeting', { method: 'POST', body: { start_time: gmStart.value.replace('T', ' '), title: gmTitle.value.trim() || undefined } });
+      toast('会议已生成', 'success'); closeModal(); location.hash = '#/meetings/' + r.id;
+    } catch (e) { toast(e.message, 'error'); }
+  };
+}
+
+async function recurringModal(id) {
+  const t = await api('/templates/' + id);
+  openModal('配置周期会议 · ' + escapeHtml(t.name), `
+    <div class="form-row"><label>周期规则</label><select id="rFreq">${RECURRENCE_FREQUENCIES.map(f => `<option value="${f.value}">${f.label}</option>`).join('')}</select></div>
+    <div class="form-grid">
+      <div class="form-row" id="rDowWrap"><label>星期</label><select id="rDow">${WEEKDAYS.map((w, i) => `<option value="${i}" ${i === 1 ? 'selected' : ''}>${w}</option>`).join('')}</select></div>
+      <div class="form-row" id="rDomWrap" hidden><label>每月日期</label><input id="rDom" type="number" min="1" max="31" value="1" /></div>
+      <div class="form-row"><label>时间</label><input id="rTime" type="time" value="10:00" /></div>
+    </div>
+    <div class="form-grid">
+      <div class="form-row"><label>生成数量 N</label><input id="rCount" type="number" min="1" max="60" value="4" /></div>
+      <div class="form-row"><label>起始日期</label><input id="rStart" type="date" /></div>
+    </div>
+    <p class="muted" style="font-size:12px">将一次性生成未来 N 次会议，自动关联本模板、继承参会人/议程，并生成纪要初稿与默认行动项。单次会议可独立修改，不影响模板。</p>
+  `, `<button class="btn" data-close="1">取消</button><button class="btn primary" id="rGo">生成</button>`, 'lg');
+  const toggle = () => {
+    const f = rFreq.value;
+    rDowWrap.hidden = !(f === 'weekly' || f === 'biweekly');
+    rDomWrap.hidden = f !== 'monthly';
+  };
+  document.getElementById('rFreq').onchange = toggle; toggle();
+  document.getElementById('rGo').onclick = async () => {
+    const body = { frequency: rFreq.value, time: rTime.value, count: Number(rCount.value), start_date: rStart.value || undefined };
+    if (body.frequency === 'weekly' || body.frequency === 'biweekly') body.day_of_week = Number(rDow.value);
+    if (body.frequency === 'monthly') body.day_of_month = Number(rDom.value);
+    try {
+      const r = await api('/templates/' + id + '/recurring/generate', { method: 'POST', body });
+      toast('已生成 ' + r.meeting_ids.length + ' 场会议', 'success'); closeModal(); location.hash = '#/meetings';
+    } catch (e) { toast(e.message, 'error'); }
+  };
+}
+
+async function delTemplate(id) {
+  if (!confirm('确认删除该模板？已生成的会议不受影响。')) return;
+  try { await api('/templates/' + id, { method: 'DELETE' }); toast('模板已删除', 'success'); viewTemplates(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+function pickTemplateModal(title, onPick) {
+  openModal(title, `<div id="pkList"><div class="empty">加载中…</div></div>`);
+  api('/templates').then(list => {
+    document.getElementById('pkList').innerHTML = list.length ? list.map(t => `<div class="pk-row" data-id="${t.id}">
+      <strong>${escapeHtml(t.name)}</strong> ${typeBadge(t.type)} <span class="muted" style="font-size:11px">${t.meeting_count} 场已生成</span>
+    </div>`).join('') : '<div class="empty">暂无模板</div>';
+    document.querySelectorAll('.pk-row').forEach(r => r.onclick = () => { closeModal(); onPick(Number(r.dataset.id)); });
+  });
+}
 
 /* ---------- init ---------- */
 async function init() {

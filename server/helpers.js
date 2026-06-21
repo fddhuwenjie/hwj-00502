@@ -73,12 +73,142 @@ function formatDate(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function parseJsonArray(json) {
+  if (!json) return [];
+  try { return JSON.parse(json) || []; } catch (e) { return []; }
+}
+
+function enrichTemplate(t) {
+  if (!t) return t;
+  t.host = t.host_id ? getUser(t.host_id) : null;
+  t.attendees = db.prepare(`
+    SELECT u.id,u.name,u.email,u.department,u.role,u.avatar_color FROM meeting_template_attendees mta
+    JOIN users u ON u.id = mta.user_id WHERE mta.template_id=? ORDER BY u.id`).all(t.id);
+  t.default_action_items = parseJsonArray(t.default_action_items);
+  t.meeting_count = db.prepare('SELECT COUNT(*) c FROM meetings WHERE template_id=?').get(t.id).c;
+  return t;
+}
+
+function computeEndTime(startTime, durationMinutes) {
+  const s = new Date(startTime.replace(' ', 'T'));
+  const e = new Date(s.getTime() + (durationMinutes || 60) * 60000);
+  const pad = n => String(n).padStart(2, '0');
+  return `${e.getFullYear()}-${pad(e.getMonth() + 1)}-${pad(e.getDate())} ${pad(e.getHours())}:${pad(e.getMinutes())}`;
+}
+
+function renderMinutesTemplate(template, meeting) {
+  let md = (template && template.minutes_template) || '';
+  if (!md) return '';
+  const dateStr = meeting && meeting.start_time ? meeting.start_time.slice(0, 10) : '';
+  const titleStr = meeting && meeting.title ? meeting.title : '';
+  const hostName = template && template.host_id ? (getUser(template.host_id) || {}).name || '' : '';
+  md = md.replace(/\{\{date\}\}/g, dateStr)
+        .replace(/\{\{title\}\}/g, titleStr)
+        .replace(/\{\{host\}\}/g, hostName);
+  return md;
+}
+
+function generateRecurringDates(rule) {
+  const pad = n => String(n).padStart(2, '0');
+  const dates = [];
+  const count = Math.max(1, Math.min(Number(rule.count) || 4, 60));
+  const time = rule.time || '10:00';
+  const startCut = rule.start_date ? new Date(rule.start_date + 'T00:00:00') : new Date();
+  startCut.setHours(0, 0, 0, 0);
+
+  function fmt(d) {
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${time}`;
+  }
+  function tryPush(d) {
+    if (d >= startCut && dates.length < count) dates.push(fmt(d));
+  }
+
+  if (rule.frequency === 'weekly' || rule.frequency === 'biweekly') {
+    const stepDays = rule.frequency === 'biweekly' ? 14 : 7;
+    const targetDow = rule.day_of_week != null ? Number(rule.day_of_week) : 1;
+    let cur = new Date(startCut);
+    let diff = (targetDow - cur.getDay() + 7) % 7;
+    cur.setDate(cur.getDate() + diff);
+    let guard = 0;
+    while (dates.length < count && guard < count + 4) {
+      tryPush(cur);
+      cur.setDate(cur.getDate() + stepDays);
+      guard++;
+    }
+  } else if (rule.frequency === 'monthly_first_workday') {
+    let year = startCut.getFullYear(), month = startCut.getMonth();
+    let guard = 0;
+    while (dates.length < count && guard < count + 12) {
+      let d = new Date(year, month, 1);
+      while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+      tryPush(d);
+      month++;
+      if (month > 11) { month = 0; year++; }
+      guard++;
+    }
+  } else if (rule.frequency === 'monthly') {
+    let year = startCut.getFullYear(), month = startCut.getMonth();
+    const dom = Number(rule.day_of_month) || 1;
+    let guard = 0;
+    while (dates.length < count && guard < count + 12) {
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      let d = new Date(year, month, Math.min(dom, daysInMonth));
+      tryPush(d);
+      month++;
+      if (month > 11) { month = 0; year++; }
+      guard++;
+    }
+  }
+  return dates;
+}
+
+function touchTemplate(templateId) {
+  if (!templateId) return;
+  db.prepare(`UPDATE meeting_templates SET last_used_at=datetime('now'), updated_at=datetime('now') WHERE id=?`).run(templateId);
+}
+
+function createMeetingFromTemplate(templateId, startTime, recurringRuleId, opts) {
+  opts = opts || {};
+  const t = db.prepare('SELECT * FROM meeting_templates WHERE id=?').get(templateId);
+  if (!t) throw new Error('模板不存在');
+  const title = opts.title || `${t.name} ${startTime.slice(0, 10)}`;
+  const endTime = computeEndTime(startTime, t.duration_minutes || 60);
+  const r = db.prepare(`INSERT INTO meetings (title,type,start_time,end_time,location,host_id,agenda,status,template_id,recurring_rule_id) VALUES (?,?,?,?,?,?,?,'planned',?,?)`)
+    .run(title, t.type, startTime, endTime, t.location || '', t.host_id || null, t.agenda || '', templateId, recurringRuleId || null);
+  const meetingId = r.lastInsertRowid;
+
+  const attendeeRows = db.prepare('SELECT user_id FROM meeting_template_attendees WHERE template_id=?').all(templateId).map(a => a.user_id);
+  const attendeeIds = [...new Set([...attendeeRows, ...(t.host_id ? [t.host_id] : [])])];
+  const insAtt = db.prepare(`INSERT OR IGNORE INTO meeting_attendees (meeting_id,user_id) VALUES (?,?)`);
+  attendeeIds.forEach(uid => insAtt.run(meetingId, uid));
+
+  const minutesContent = opts.includeMinutes === false ? '' : renderMinutesTemplate(t, { title, start_time: startTime });
+  db.prepare(`INSERT INTO minutes (meeting_id,content) VALUES (?,?)`).run(meetingId, minutesContent);
+
+  if (opts.includeActionItems !== false) {
+    const items = parseJsonArray(t.default_action_items);
+    const insItem = db.prepare(`INSERT INTO action_items (meeting_id,title,owner_id,due_date,priority,status,progress) VALUES (?,?,?,?,?,?,?)`);
+    items.forEach(it => {
+      insItem.run(meetingId, it.title || '', it.owner_id || null, it.due_date || null, it.priority || '中', it.status || '待开始', it.progress || 0);
+    });
+  }
+  touchTemplate(templateId);
+  return meetingId;
+}
+
 module.exports = {
   getUser,
   resolveCollaborators,
   enrichActionItem,
   enrichMeeting,
+  enrichTemplate,
   addTimeline,
   ensureOverdueNotifications,
-  formatDate
+  formatDate,
+  parseJsonArray,
+  computeEndTime,
+  renderMinutesTemplate,
+  generateRecurringDates,
+  createMeetingFromTemplate,
+  touchTemplate
 };

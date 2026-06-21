@@ -2,19 +2,21 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { db, initSchema } = require('./db');
-const { seed } = require('./seed');
+const { seed, seedTemplates } = require('./seed');
 
 initSchema();
 const userCount = db.prepare(`SELECT COUNT(*) c FROM users`).get().c;
 if (userCount === 0) {
   seed();
 }
+seedTemplates();
 
 const meetingsRouter = require('./routes/meetings');
 const minutesRouter = require('./routes/minutes');
 const actionItemsRouter = require('./routes/actionItems');
 const usersRouter = require('./routes/users');
 const statsRouter = require('./routes/stats');
+const templatesRouter = require('./routes/templates');
 
 const api = express();
 api.use(cors());
@@ -27,6 +29,7 @@ api.use('/api/meetings/:meetingId/minutes', minutesRouter);
 api.use('/api/action-items', actionItemsRouter);
 api.use('/api/users', usersRouter);
 api.use('/api/stats', statsRouter);
+api.use('/api/templates', templatesRouter);
 
 api.use((err, req, res, next) => {
   console.error(err);

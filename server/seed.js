@@ -3,13 +3,64 @@ const { db, initSchema, MEETING_TYPES } = require('./db');
 function reset() {
   ['notifications', 'extension_requests', 'action_item_timeline',
    'action_item_comments', 'read_confirmations', 'minutes',
-   'action_items', 'meeting_attendees', 'meetings', 'users'].forEach(t => {
+   'action_items', 'meeting_attendees', 'recurring_rules',
+   'meeting_template_attendees', 'meetings', 'meeting_templates', 'users'].forEach(t => {
     db.exec(`DELETE FROM ${t};`);
   });
   db.exec(`
     DELETE FROM sqlite_sequence;
     SELECT 'ok';
   `);
+}
+
+function seedTemplates() {
+  initSchema();
+  const exists = db.prepare(`SELECT COUNT(*) c FROM meeting_templates`).get().c;
+  if (exists > 0) return;
+
+  const templates = [
+    {
+      name: '产品周会模板', type: '周会', host_id: 1, location: '会议室A-301', duration: 60,
+      attendees: [1, 2, 3, 4, 6],
+      agenda: '1. 上周进度回顾\n2. 本周计划对齐\n3. 风险与阻塞\n4. 其他事项',
+      minutes_template: '# {{title}}\n\n## 一、议题\n1. 上周进度回顾\n2. 本周计划对齐\n3. 风险与阻塞\n4. 其他事项\n\n## 二、讨论内容\n- \n\n## 三、决议\n- \n\n## 四、风险\n- \n\n## 五、附件\n- ',
+      action_items: [
+        { title: '本周风险项跟进', owner_id: 6, priority: '中' },
+        { title: '更新进度到团队周报', owner_id: 1, priority: '低' }
+      ]
+    },
+    {
+      name: '需求评审模板', type: '评审', host_id: 1, location: '线上-腾讯会议', duration: 60,
+      attendees: [1, 2, 3, 5, 6],
+      agenda: '1. 需求评审\n2. 方案确认\n3. 风险评估',
+      minutes_template: '# {{title}}\n\n## 一、议题\n1. 需求评审\n2. 方案确认\n3. 风险评估\n\n## 二、讨论内容\n- \n\n## 三、决议\n- \n\n## 四、风险\n- \n\n## 五、附件\n- ',
+      action_items: [
+        { title: '完善需求文档', owner_id: 1, priority: '高' },
+        { title: '输出技术方案', owner_id: 3, priority: '高' },
+        { title: '设计稿评审', owner_id: 5, priority: '中' }
+      ]
+    },
+    {
+      name: '复盘会模板', type: '复盘', host_id: 6, location: '会议室C-101', duration: 120,
+      attendees: [1, 2, 3, 4, 5, 6, 7],
+      agenda: '1. 目标回顾\n2. 经验总结\n3. 改进计划',
+      minutes_template: '# {{title}}\n\n## 一、议题\n1. 目标回顾\n2. 经验总结\n3. 改进计划\n\n## 二、讨论内容\n- \n\n## 三、决议\n- \n\n## 四、改进项\n- \n\n## 五、附件\n- ',
+      action_items: [
+        { title: '输出复盘报告', owner_id: 6, priority: '中' },
+        { title: '改进项排期落地', owner_id: 1, priority: '中' }
+      ]
+    }
+  ];
+
+  const insTpl = db.prepare(`INSERT INTO meeting_templates (name,type,host_id,location,agenda,minutes_template,default_action_items,duration_minutes,last_used_at) VALUES (?,?,?,?,?,?,?,?,?)`);
+  const insAtt = db.prepare(`INSERT OR IGNORE INTO meeting_template_attendees (template_id,user_id) VALUES (?,?)`);
+  templates.forEach(t => {
+    const res = insTpl.run(t.name, t.type, t.host_id, t.location, t.agenda, t.minutes_template, JSON.stringify(t.action_items), t.duration, null);
+    const tid = res.lastInsertRowid;
+    [...new Set([...t.attendees, t.host_id])].forEach(uid => insAtt.run(tid, uid));
+  });
+
+  console.log(`Seed templates completed: ${templates.length} meeting templates.`);
 }
 
 function seed() {
@@ -168,4 +219,4 @@ function seed() {
 if (require.main === module) {
   seed();
 }
-module.exports = { seed };
+module.exports = { seed, seedTemplates };

@@ -129,12 +129,61 @@ function initSchema() {
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS meeting_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      host_id INTEGER,
+      location TEXT,
+      agenda TEXT,
+      minutes_template TEXT,
+      default_action_items TEXT,
+      duration_minutes INTEGER DEFAULT 60,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      last_used_at TEXT,
+      FOREIGN KEY (host_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS meeting_template_attendees (
+      template_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      PRIMARY KEY (template_id, user_id),
+      FOREIGN KEY (template_id) REFERENCES meeting_templates(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS recurring_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      template_id INTEGER NOT NULL,
+      frequency TEXT NOT NULL,
+      day_of_week INTEGER,
+      day_of_month INTEGER,
+      time TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 4,
+      start_date TEXT,
+      last_generated_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (template_id) REFERENCES meeting_templates(id) ON DELETE CASCADE
+    );
   `);
+
+  const meetingsCols = db.prepare(`PRAGMA table_info(meetings)`).all().map(c => c.name);
+  if (!meetingsCols.includes('template_id')) {
+    db.exec(`ALTER TABLE meetings ADD COLUMN template_id INTEGER`);
+  }
+  if (!meetingsCols.includes('recurring_rule_id')) {
+    db.exec(`ALTER TABLE meetings ADD COLUMN recurring_rule_id INTEGER`);
+  }
 }
 
 const MEETING_TYPES = ['周会', '评审', '复盘', '客户会议', '临时会议'];
 const PRIORITIES = ['高', '中', '低'];
 const STATUSES = ['待开始', '进行中', '已完成', '延期', '取消'];
+const RECURRENCE_FREQUENCIES = ['weekly', 'biweekly', 'monthly', 'monthly_first_workday'];
+const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
 function isOverdue(item) {
   if (!item || !item.due_date) return false;
@@ -151,6 +200,8 @@ module.exports = {
   MEETING_TYPES,
   PRIORITIES,
   STATUSES,
+  RECURRENCE_FREQUENCIES,
+  WEEKDAYS,
   isOverdue,
   DB_PATH
 };
