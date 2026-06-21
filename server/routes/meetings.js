@@ -14,7 +14,10 @@ router.get('/', (req, res) => {
     sql += ` AND EXISTS (SELECT 1 FROM meeting_attendees ma WHERE ma.meeting_id=m.id AND ma.user_id=?)`;
     params.push(attendee);
   }
-  if (keyword) { sql += ` AND (m.title LIKE ? OR m.agenda LIKE ?)`; params.push(`%${keyword}%`, `%${keyword}%`); }
+  if (keyword) {
+    sql += ` AND (m.title LIKE ? OR m.agenda LIKE ? OR EXISTS (SELECT 1 FROM minutes mi WHERE mi.meeting_id=m.id AND mi.content LIKE ?))`;
+    params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+  }
   if (start) { sql += ` AND m.start_time >= ?`; params.push(start); }
   if (end) { sql += ` AND m.start_time <= ?`; params.push(end); }
   sql += ` ORDER BY m.start_time DESC`;
