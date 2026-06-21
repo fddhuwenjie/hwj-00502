@@ -1,5 +1,5 @@
 const express = require('express');
-const { db, MEETING_TYPES, STATUSES } = require('../db');
+const { db, MEETING_TYPES, STATUSES, DECISION_STATUSES } = require('../db');
 const { enrichActionItem, ensureOverdueNotifications, enrichDecision } = require('../helpers');
 
 const router = express.Router();
@@ -47,6 +47,10 @@ router.get('/overview', (req, res) => {
     acc[t] = decisions.filter(d => d.meeting && d.meeting.type === t).length;
     return acc;
   }, {});
+  const decisionByStatus = DECISION_STATUSES.reduce((acc, s) => {
+    acc[s] = decisions.filter(d => d.status === s).length;
+    return acc;
+  }, {});
 
   res.json({
     month: ym,
@@ -67,6 +71,7 @@ router.get('/overview', (req, res) => {
       completed: completedDecisions.length,
       overdue: overdueDecisions.length,
       completion_rate: decisionCompletionRate,
+      by_status: decisionByStatus,
       by_meeting_type: decisionByMeetingType
     }
   });

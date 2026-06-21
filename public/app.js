@@ -1173,18 +1173,20 @@ function decisionForm(d, meetingId) {
       risk: dcRisk.value
     };
     try {
+      let resultId = d ? d.id : null;
       if (d) {
         await api('/decisions/' + d.id, { method: 'PUT', body });
         toast('决议已更新', 'success');
       } else {
         const r = await api('/decisions', { method: 'POST', body });
+        resultId = r.id;
         toast('决议已创建', 'success');
       }
       closeModal();
       if (location.hash.startsWith('#/decisions/')) {
-        viewDecisionDetail(d ? d.id : r.id);
+        viewDecisionDetail(resultId);
       } else if (location.hash.startsWith('#/meetings/')) {
-        loadMeetingDecisions(meetingId);
+        loadMeetingDecisions(meetingId || dec.meeting_id);
       } else {
         viewDecisions();
       }

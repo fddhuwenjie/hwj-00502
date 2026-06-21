@@ -188,29 +188,6 @@ router.get('/:id/action-items', (req, res) => {
   res.json(items);
 });
 
-router.post('/:id/action-items/:actionItemId', (req, res) => {
-  const d = db.prepare(`SELECT * FROM decisions WHERE id=?`).get(req.params.id);
-  if (!d) return res.status(404).json({ error: '决议不存在' });
-  const ai = db.prepare(`SELECT * FROM action_items WHERE id=?`).get(req.params.actionItemId);
-  if (!ai) return res.status(404).json({ error: '行动项不存在' });
-
-  const exists = db.prepare(`SELECT 1 FROM decision_action_items WHERE decision_id=? AND action_item_id=?`)
-    .get(d.id, ai.id);
-  if (exists) return res.json({ id: d.id, unchanged: true });
-
-  db.prepare(`INSERT OR IGNORE INTO decision_action_items (decision_id,action_item_id) VALUES (?,?)`)
-    .run(d.id, ai.id);
-  db.prepare(`UPDATE decisions SET updated_at=datetime('now') WHERE id=?`).run(d.id);
-  res.status(201).json({ id: d.id });
-});
-
-router.delete('/:id/action-items/:actionItemId', (req, res) => {
-  db.prepare(`DELETE FROM decision_action_items WHERE decision_id=? AND action_item_id=?`)
-    .run(req.params.id, req.params.actionItemId);
-  db.prepare(`UPDATE decisions SET updated_at=datetime('now') WHERE id=?`).run(req.params.id);
-  res.json({ ok: true });
-});
-
 router.post('/:id/action-items/batch-create', (req, res) => {
   const d = db.prepare(`SELECT * FROM decisions WHERE id=?`).get(req.params.id);
   if (!d) return res.status(404).json({ error: '决议不存在' });
@@ -239,6 +216,29 @@ router.post('/:id/action-items/batch-create', (req, res) => {
   tx();
 
   res.status(201).json({ created: createdIds.length, ids: createdIds });
+});
+
+router.post('/:id/action-items/:actionItemId', (req, res) => {
+  const d = db.prepare(`SELECT * FROM decisions WHERE id=?`).get(req.params.id);
+  if (!d) return res.status(404).json({ error: '决议不存在' });
+  const ai = db.prepare(`SELECT * FROM action_items WHERE id=?`).get(req.params.actionItemId);
+  if (!ai) return res.status(404).json({ error: '行动项不存在' });
+
+  const exists = db.prepare(`SELECT 1 FROM decision_action_items WHERE decision_id=? AND action_item_id=?`)
+    .get(d.id, ai.id);
+  if (exists) return res.json({ id: d.id, unchanged: true });
+
+  db.prepare(`INSERT OR IGNORE INTO decision_action_items (decision_id,action_item_id) VALUES (?,?)`)
+    .run(d.id, ai.id);
+  db.prepare(`UPDATE decisions SET updated_at=datetime('now') WHERE id=?`).run(d.id);
+  res.status(201).json({ id: d.id });
+});
+
+router.delete('/:id/action-items/:actionItemId', (req, res) => {
+  db.prepare(`DELETE FROM decision_action_items WHERE decision_id=? AND action_item_id=?`)
+    .run(req.params.id, req.params.actionItemId);
+  db.prepare(`UPDATE decisions SET updated_at=datetime('now') WHERE id=?`).run(req.params.id);
+  res.json({ ok: true });
 });
 
 module.exports = router;
