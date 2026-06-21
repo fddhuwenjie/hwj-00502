@@ -5,8 +5,10 @@ let USERS = [];
 const MEETING_TYPES = ['周会', '评审', '复盘', '客户会议', '临时会议'];
 const PRIORITIES = ['高', '中', '低'];
 const STATUSES = ['待开始', '进行中', '已完成', '延期', '取消'];
+const DECISION_STATUSES = ['草稿', '已确认', '执行中', '已完成', '已废弃'];
 const TYPE_COLOR = { '周会': '#4f6df5', '评审': '#f08c00', '复盘': '#0ca678', '客户会议': '#d6336c', '临时会议': '#7048e8' };
 const STATUS_COLOR = { '待开始': '#adb5bd', '进行中': '#4f6df5', '已完成': '#0ca678', '延期': '#e03131', '取消': '#868e96' };
+const DECISION_STATUS_COLOR = { '草稿': '#adb5bd', '已确认': '#4f6df5', '执行中': '#f08c00', '已完成': '#0ca678', '已废弃': '#868e96' };
 const RECURRENCE_FREQUENCIES = [
   { value: 'weekly', label: '每周（指定星期）' },
   { value: 'biweekly', label: '每两周一次' },
@@ -52,6 +54,7 @@ function badge(html, cls) { return `<span class="badge ${cls}">${escapeHtml(html
 function priorityBadge(p) { return badge(p, 'pri-' + p); }
 function statusBadge(s) { return badge(s, 'st-' + s); }
 function typeBadge(t) { return badge(t, 'type-' + typeClass(t)); }
+function decisionStatusBadge(s) { return badge(s, 'dst-' + s); }
 
 async function api(path, options = {}) {
   const opt = { headers: { 'Content-Type': 'application/json' }, ...options };
@@ -159,6 +162,10 @@ async function route() {
       if (rest[0]) await viewActionDetail(rest[0]);
       else await viewActions();
     }
+    else if (view === 'decisions') {
+      if (rest[0]) await viewDecisionDetail(rest[0]);
+      else await viewDecisions();
+    }
     else if (view === 'search') await viewSearch();
     else if (view === 'people') await viewPeople();
     else await viewDashboard();
@@ -178,12 +185,21 @@ async function viewDashboard() {
   const typeRows = MEETING_TYPES.map(t => ({ label: t, value: ov.meeting_type_ratio[t] || 0 }));
   const statusRows = STATUSES.map(s => ({ label: s, value: st[s] || 0 }));
   const top = owners.slice(0, 6);
+  const dec = ov.decisions || {};
+  const decStatusRows = DECISION_STATUSES.map(s => ({ label: s, value: (dec.by_status && dec.by_status[s]) || 0 }));
+  const decTypeRows = MEETING_TYPES.map(t => ({ label: t, value: (dec.by_meeting_type && dec.by_meeting_type[t]) || 0 }));
   app.querySelector('#dash').innerHTML = `
     <div class="grid cols-4">
       <div class="stat accent"><div class="label">本月会议数</div><div class="value">${ov.monthly_meetings}</div><div class="hint">总会议 ${ov.total_meetings} 场</div></div>
       <div class="stat success"><div class="label">平均会议时长（本月）</div><div class="value">${ov.monthly_avg_duration}<span style="font-size:14px"> 分钟</span></div><div class="hint">整体均值 ${ov.total_avg_duration} 分钟</div></div>
       <div class="stat"><div class="label">行动项总数</div><div class="value">${totalItems}</div><div class="hint">已完成 ${st['已完成'] || 0} · 进行中 ${st['进行中'] || 0}</div></div>
-      <div class="stat danger"><div class="label">逾期率</div><div class="value">${ov.overdue_rate}%</div><div class="hint">逾期 ${ov.overdue_count} 项</div></div>
+      <div class="stat danger"><div class="label">行动项逾期率</div><div class="value">${ov.overdue_rate}%</div><div class="hint">逾期 ${ov.overdue_count} 项</div></div>
+    </div>
+    <div class="grid cols-4" style="margin-top:16px">
+      <div class="stat accent"><div class="label">本月新增决议</div><div class="value">${dec.monthly_new || 0}</div><div class="hint">决议总数 ${dec.total || 0}</div></div>
+      <div class="stat warn"><div class="label">执行中决议</div><div class="value">${dec.in_progress || 0}</div><div class="hint">跟踪落地进度</div></div>
+      <div class="stat success"><div class="label">决议完成率</div><div class="value">${dec.completion_rate || 0}%</div><div class="hint">已完成 ${dec.completed || 0} 项</div></div>
+      <div class="stat danger"><div class="label">逾期未完成</div><div class="value">${dec.overdue || 0}</div><div class="hint">存在逾期行动项</div></div>
     </div>
     <div class="grid cols-2" style="margin-top:16px">
       <div class="card">
@@ -209,6 +225,19 @@ async function viewDashboard() {
       <div class="card">
         <div class="card-title">月度会议趋势</div>
         ${barChart(ov.monthly_trend.map(t => ({ label: t.month.slice(5), value: t.count })), () => 'var(--primary)')}
+      </div>
+    </div>
+    <div class="grid cols-2" style="margin-top:16px">
+      <div class="card">
+        <div class="card-title">决议状态分布</div>
+        <div class="donut-wrap">
+          ${donut(decStatusRows.map(r => ({ value: r.value, color: DECISION_STATUS_COLOR[r.label] })))}
+          <div class="legend">${decStatusRows.map(r => `<div class="li"><span class="dot" style="background:${DECISION_STATUS_COLOR[r.label]}"></span>${r.label}：${r.value}</div>`).join('')}</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">决议按会议类型分布</div>
+        ${barChart(decTypeRows.map(r => ({ label: r.label, value: r.value })), r => TYPE_COLOR[r.label])}
       </div>
     </div>
     <div class="card" style="margin-top:16px">
@@ -362,6 +391,13 @@ async function viewMeetingDetail(id) {
           <div class="card-title">关联行动项 <span class="actions"><button class="btn sm" id="aiFromTpl">从模板生成默认行动项</button><button class="btn sm primary" id="addAction">+ 从纪要创建行动项</button></span></div>
           <div id="mActions"><div class="empty">加载中…</div></div>
         </div>
+        <div class="card">
+          <div class="card-title">会议决议 <span class="actions">
+            <button class="btn sm" id="genDecFromMin">📋 从纪要提取决议</button>
+            <button class="btn sm primary" id="addDec">+ 新建决议</button>
+          </span></div>
+          <div id="mDecisions"><div class="empty">加载中…</div></div>
+        </div>
       </div>
       <div>
         <div class="card">
@@ -382,6 +418,7 @@ async function viewMeetingDetail(id) {
       </div>
     </div>`;
   loadMeetingActions(id);
+  loadMeetingDecisions(id);
 
   let mdContent = minutes.content;
   const mdArea = document.getElementById('mdArea');
@@ -433,6 +470,8 @@ async function viewMeetingDetail(id) {
       toast('已生成 ' + r.created + ' 条默认行动项', 'success'); loadMeetingActions(id);
     });
   };
+  document.getElementById('addDec').onclick = () => decisionForm(null, id);
+  document.getElementById('genDecFromMin').onclick = () => generateDecisionsFromMinutes(id, minutes.content);
 }
 
 async function loadMeetingActions(meetingId) {
@@ -447,6 +486,96 @@ async function loadMeetingActions(meetingId) {
       <td><div class="progress ${a.is_overdue ? 'overdue' : ''} ${a.status === '已完成' ? 'done' : ''}"><span style="width:${a.progress}%"></span></div><span class="muted" style="font-size:11px">${a.progress}%</span></td>
       <td>${statusBadge(a.status)}</td>
     </tr>`).join('')}</tbody></table>` : `<div class="empty" style="padding:24px"><div class="big">📝</div>暂无行动项，可从纪要创建</div>`;
+}
+
+async function loadMeetingDecisions(meetingId) {
+  const list = await api('/decisions?meeting=' + meetingId);
+  document.getElementById('mDecisions').innerHTML = list.length ? `<table class="tbl">
+    <thead><tr><th>决议标题</th><th>状态</th><th>优先级</th><th>行动项完成率</th><th>最近更新</th></tr></thead>
+    <tbody>${list.map(d => `<tr onclick="location.hash='#/decisions/${d.id}'">
+      <td><strong>${escapeHtml(d.title)}</strong>
+        <div class="muted" style="font-size:11px;margin-top:2px">${escapeHtml(d.impact_scope || '')}</div>
+      </td>
+      <td>${decisionStatusBadge(d.status)}</td>
+      <td>${priorityBadge(d.priority)}</td>
+      <td><div class="progress ${d.action_item_completion_rate >= 100 ? 'done' : ''}" style="max-width:100px"><span style="width:${d.action_item_completion_rate}%"></span></div>
+        <span class="muted" style="font-size:11px">${d.action_item_completion_rate}%（${d.action_item_count}项）</span>
+      </td>
+      <td>${fmtDate(d.updated_at)}</td>
+    </tr>`).join('')}</tbody></table>` : `<div class="empty" style="padding:24px"><div class="big">📋</div>暂无决议，可从纪要提取或手动创建</div>`;
+}
+
+function generateDecisionsFromMinutes(meetingId, minutesContent) {
+  const lines = (minutesContent || '').split(/\r?\n/);
+  const extracted = [];
+  let inDecisionSection = false;
+  let currentTitle = '';
+  let currentContent = '';
+
+  lines.forEach(line => {
+    if (/^##\s*.*决议/.test(line) || /^###\s*.*决议/.test(line)) {
+      inDecisionSection = true;
+      return;
+    }
+    if (inDecisionSection && /^##\s/.test(line)) {
+      inDecisionSection = false;
+      return;
+    }
+    if (inDecisionSection) {
+      const m = line.match(/^\s*[-*]\s*(.+)$/);
+      if (m) {
+        const text = m[1].trim();
+        if (text) {
+          extracted.push({
+            title: text.length > 50 ? text.slice(0, 50) + '...' : text,
+            content: text
+          });
+        }
+      }
+    }
+  });
+
+  if (extracted.length === 0) {
+    toast('未在纪要中找到决议条目，请确保纪要中有「决议」章节', 'error');
+    return;
+  }
+
+  let idx = 0;
+  const showNext = () => {
+    if (idx >= extracted.length) {
+      toast('已全部提取', 'success');
+      loadMeetingDecisions(meetingId);
+      return;
+    }
+    const item = extracted[idx];
+    openModal(`提取决议 (${idx + 1}/${extracted.length})`, `
+      <div class="form-row"><label>决议标题 *</label><input id="gdTitle" value="${escapeHtml(item.title)}" /></div>
+      <div class="form-grid">
+        <div class="form-row"><label>决策人</label><select id="gdMaker"><option value="">请选择</option>${USERS.map(u => `<option value="${u.id}" ${ME?.id === u.id ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}</select></div>
+        <div class="form-row"><label>优先级</label><select id="gdPri">${PRIORITIES.map(p => `<option ${p === '中' ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+      </div>
+      <div class="form-row"><label>决策内容</label><textarea id="gdContent" rows="4">${escapeHtml(item.content)}</textarea></div>
+      <div class="form-row"><label>影响范围</label><input id="gdScope" placeholder="如：前端组、全公司" /></div>
+    `, `<button class="btn" data-close="1">取消</button><button class="btn" id="gdSkip">跳过</button><button class="btn primary" id="gdSave">保存并下一条</button>`);
+    document.getElementById('gdSkip').onclick = () => { idx++; closeModal(); showNext(); };
+    document.getElementById('gdSave').onclick = async () => {
+      try {
+        await api('/decisions', { method: 'POST', body: {
+          title: gdTitle.value.trim(),
+          content: gdContent.value,
+          decision_maker_id: Number(gdMaker.value) || null,
+          priority: gdPri.value,
+          impact_scope: gdScope.value,
+          meeting_id: meetingId,
+          status: '已确认'
+        }});
+        idx++;
+        closeModal();
+        showNext();
+      } catch (e) { toast(e.message, 'error'); }
+    };
+  };
+  showNext();
 }
 
 /* ---------- action items list ---------- */
@@ -952,3 +1081,305 @@ async function init() {
   route();
 }
 init();
+
+let decisionsFilters = { status: '', priority: '', decision_maker: '', meeting_type: '', keyword: '', start: '', end: '' };
+async function viewDecisions() {
+  app.innerHTML = `<div class="page-head">
+      <div><h1 class="page-title">决议中心</h1><p class="page-desc">会议决议与执行闭环管理，追踪决议从立项到落地的全过程</p></div>
+      <button class="btn primary" onclick="decisionForm()">+ 新建决议</button>
+    </div>
+    <div class="toolbar">
+      <select id="dStatus"><option value="">全部状态</option>${DECISION_STATUSES.map(s => `<option ${decisionsFilters.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select>
+      <select id="dPri"><option value="">全部优先级</option>${PRIORITIES.map(p => `<option ${decisionsFilters.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>
+      <select id="dMaker"><option value="">全部决策人</option>${USERS.map(u => `<option value="${u.id}" ${String(decisionsFilters.decision_maker) === String(u.id) ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}</select>
+      <select id="dType"><option value="">全部会议类型</option>${MEETING_TYPES.map(t => `<option ${decisionsFilters.meeting_type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <input id="dKw" placeholder="搜索标题/内容" value="${escapeHtml(decisionsFilters.keyword)}" style="flex:1;max-width:200px" />
+      <input id="dStart" type="date" value="${decisionsFilters.start}" title="开始日期" />
+      <input id="dEnd" type="date" value="${decisionsFilters.end}" title="结束日期" />
+      <button class="btn primary" id="dGo">筛选</button>
+    </div>
+    <div class="card"><div id="dList"><div class="empty">加载中…</div></div></div>`;
+  const go = async () => {
+    decisionsFilters = {
+      status: dStatus.value, priority: dPri.value, decision_maker: dMaker.value,
+      meeting_type: dType.value, keyword: dKw.value, start: dStart.value, end: dEnd.value
+    };
+    const qs = new URLSearchParams();
+    if (decisionsFilters.status) qs.set('status', decisionsFilters.status);
+    if (decisionsFilters.priority) qs.set('priority', decisionsFilters.priority);
+    if (decisionsFilters.decision_maker) qs.set('decision_maker', decisionsFilters.decision_maker);
+    if (decisionsFilters.meeting_type) qs.set('meeting_type', decisionsFilters.meeting_type);
+    if (decisionsFilters.keyword) qs.set('keyword', decisionsFilters.keyword);
+    if (decisionsFilters.start) qs.set('start', decisionsFilters.start + ' 00:00');
+    if (decisionsFilters.end) qs.set('end', decisionsFilters.end + ' 23:59');
+    const list = await api('/decisions?' + qs.toString());
+    document.getElementById('dList').innerHTML = list.length ? `<table class="tbl">
+      <thead><tr><th>决议标题</th><th>状态</th><th>优先级</th><th>决策人</th><th>关联会议</th><th>行动项完成率</th><th>最近更新</th></tr></thead>
+      <tbody>${list.map(d => `<tr onclick="location.hash='#/decisions/${d.id}'">
+        <td><strong>${escapeHtml(d.title)}</strong>
+          <div class="muted" style="font-size:11px;margin-top:2px">${escapeHtml(d.impact_scope || '影响范围未设置')}</div>
+        </td>
+        <td>${decisionStatusBadge(d.status)}</td>
+        <td>${priorityBadge(d.priority)}</td>
+        <td>${d.decision_maker ? avatar(d.decision_maker) + ' ' + escapeHtml(d.decision_maker.name) : '-'}</td>
+        <td>${d.meeting ? typeBadge(d.meeting.type) + ' ' + escapeHtml(d.meeting.title).slice(0, 14) : '<span class="muted">未关联</span>'}</td>
+        <td><div class="progress ${d.action_item_completion_rate >= 100 ? 'done' : ''}" style="max-width:120px"><span style="width:${d.action_item_completion_rate}%"></span></div>
+          <span class="muted" style="font-size:11px">${d.action_item_completion_rate}%（${d.action_item_count}项）</span>
+        </td>
+        <td>${fmtDate(d.updated_at)}</td>
+      </tr>`).join('')}</tbody></table>` : `<div class="empty"><div class="big">📋</div>暂无符合条件的决议</div>`;
+  };
+  document.getElementById('dGo').onclick = go;
+  go();
+}
+
+function decisionForm(d, meetingId) {
+  const dec = d || {
+    title: '', background: '', content: '', decision_maker_id: ME?.id,
+    impact_scope: '', priority: '中', effective_date: '',
+    meeting_id: meetingId || null, status: '草稿', risk: ''
+  };
+  openModal(d ? '编辑决议' : '新建决议', `
+    <div class="form-row"><label>决议标题 *</label><input id="dcTitle" value="${escapeHtml(dec.title)}" placeholder="如：组件库升级本周完成联调" /></div>
+    <div class="form-grid">
+      <div class="form-row"><label>决策人</label><select id="dcMaker"><option value="">请选择</option>${USERS.map(u => `<option value="${u.id}" ${dec.decision_maker_id === u.id ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}</select></div>
+      <div class="form-row"><label>优先级</label><select id="dcPri">${PRIORITIES.map(p => `<option ${dec.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-grid">
+      <div class="form-row"><label>生效日期</label><input id="dcEff" type="date" value="${dec.effective_date ? dec.effective_date.slice(0, 10) : ''}" /></div>
+      <div class="form-row"><label>状态</label><select id="dcStatus">${DECISION_STATUSES.map(s => `<option ${dec.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-row"><label>关联会议</label><select id="dcMeeting"><option value="">未关联</option></select></div>
+    <div class="form-row"><label>背景说明</label><textarea id="dcBg" rows="3" placeholder="决议的背景与动因">${escapeHtml(dec.background || '')}</textarea></div>
+    <div class="form-row"><label>决策内容 *</label><textarea id="dcContent" rows="4" placeholder="具体的决策结论与要求">${escapeHtml(dec.content || '')}</textarea></div>
+    <div class="form-row"><label>影响范围</label><input id="dcScope" value="${escapeHtml(dec.impact_scope || '')}" placeholder="如：前端组、后端组、全公司" /></div>
+    <div class="form-row"><label>执行风险</label><textarea id="dcRisk" rows="2" placeholder="可能的风险与应对措施">${escapeHtml(dec.risk || '')}</textarea></div>
+  `, `<button class="btn" data-close="1">取消</button><button class="btn primary" id="saveDc">保存</button>`, 'lg');
+  api('/meetings').then(ms => {
+    const sel = document.getElementById('dcMeeting');
+    sel.innerHTML = `<option value="">未关联</option>` + ms.map(m => `<option value="${m.id}" ${dec.meeting_id === m.id ? 'selected' : ''}>${escapeHtml(m.title)}</option>`).join('');
+  });
+  document.getElementById('saveDc').onclick = async () => {
+    const body = {
+      title: dcTitle.value.trim(),
+      background: dcBg.value,
+      content: dcContent.value,
+      decision_maker_id: Number(dcMaker.value) || null,
+      impact_scope: dcScope.value,
+      priority: dcPri.value,
+      effective_date: dcEff.value || null,
+      meeting_id: Number(dcMeeting.value) || null,
+      status: dcStatus.value,
+      risk: dcRisk.value
+    };
+    try {
+      if (d) {
+        await api('/decisions/' + d.id, { method: 'PUT', body });
+        toast('决议已更新', 'success');
+      } else {
+        const r = await api('/decisions', { method: 'POST', body });
+        toast('决议已创建', 'success');
+      }
+      closeModal();
+      if (location.hash.startsWith('#/decisions/')) {
+        viewDecisionDetail(d ? d.id : r.id);
+      } else if (location.hash.startsWith('#/meetings/')) {
+        loadMeetingDecisions(meetingId);
+      } else {
+        viewDecisions();
+      }
+    } catch (e) { toast(e.message, 'error'); }
+  };
+}
+
+async function viewDecisionDetail(id) {
+  app.innerHTML = `<div id="dd"><div class="empty">加载中…</div></div>`;
+  const d = await api('/decisions/' + id);
+  document.getElementById('dd').innerHTML = `
+    <div class="page-head">
+      <div>
+        <h1 class="page-title">${escapeHtml(d.title)}</h1>
+        <div class="row wrap" style="margin-top:6px">
+          ${decisionStatusBadge(d.status)}
+          ${priorityBadge(d.priority)}
+          ${d.meeting ? `<a href="#/meetings/${d.meeting.id}">📎 ${escapeHtml(d.meeting.title)}</a>` : ''}
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn" id="editDc">✏️ 编辑</button>
+        <button class="btn primary" id="changeStatusBtn">状态变更</button>
+      </div>
+    </div>
+    <div class="detail-layout">
+      <div>
+        <div class="card">
+          <div class="card-title">决策内容</div>
+          <div class="md-preview">${renderMarkdown(d.content || '（暂无内容）')}</div>
+        </div>
+        ${d.background ? `<div class="card">
+          <div class="card-title">背景说明</div>
+          <div class="md-preview">${renderMarkdown(d.background)}</div>
+        </div>` : ''}
+        <div class="card">
+          <div class="card-title">关联行动项 <span class="actions">
+            <button class="btn sm" id="linkAiBtn">关联现有行动项</button>
+            <button class="btn sm primary" id="batchAiBtn">拆解为行动项</button>
+          </span></div>
+          <div id="ddAiList">${d.action_items.length ? `<table class="tbl">
+            <thead><tr><th>标题</th><th>负责人</th><th>截止</th><th>进度</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody>${d.action_items.map(a => `<tr onclick="location.hash='#/actions/${a.id}'">
+              <td>${a.is_overdue ? '<span class="overdue-flag">●</span> ' : ''}${escapeHtml(a.title)}</td>
+              <td>${a.owner ? escapeHtml(a.owner.name) : '-'}</td>
+              <td>${fmtDay(a.due_date)}${a.is_overdue ? ' <span class="overdue-flag">逾期</span>' : ''}</td>
+              <td><div class="progress ${a.is_overdue ? 'overdue' : ''} ${a.status === '已完成' ? 'done' : ''}"><span style="width:${a.progress}%"></span></div><span class="muted" style="font-size:11px">${a.progress}%</span></td>
+              <td>${statusBadge(a.status)}</td>
+              <td onclick="event.stopPropagation()"><button class="btn sm danger" onclick="unlinkActionItem(${d.id}, ${a.id})">解除</button></td>
+            </tr>`).join('')}</tbody></table>` : '<div class="empty" style="padding:24px"><div class="big">📝</div>暂无关联行动项，可从决议拆解创建</div>'}</div>
+        </div>
+        ${d.risk ? `<div class="card">
+          <div class="card-title">执行风险</div>
+          <div class="risk-box">${escapeHtml(d.risk)}</div>
+        </div>` : ''}
+        <div class="card">
+          <div class="card-title">评论讨论</div>
+          <div class="comment-list">${d.comments.map(c => `<div class="cmt">
+            <div class="cmt-head">${avatar({ name: c.name, avatar_color: c.avatar_color })}<span class="cmt-name">${escapeHtml(c.name)}</span><span class="cmt-time">${fmtDate(c.created_at)}</span></div>
+            <div class="cmt-body">${escapeHtml(c.content)}</div>
+          </div>`).join('') || '<div class="muted">暂无评论</div>'}</div>
+          <div class="row" style="margin-top:10px"><input id="dcCmtInput" placeholder="发表评论…" style="flex:1" /><button class="btn primary" id="postDcCmt">发送</button></div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-title">决议信息</div>
+          <div class="kv"><span class="k">决策人</span>${d.decision_maker ? avatar(d.decision_maker) + ' ' + escapeHtml(d.decision_maker.name) : '-'}</div>
+          <div class="kv"><span class="k">影响范围</span>${escapeHtml(d.impact_scope || '-')}</div>
+          <div class="kv"><span class="k">生效日期</span>${fmtDay(d.effective_date)}</div>
+          <div class="kv"><span class="k">创建时间</span>${fmtDate(d.created_at)}</div>
+          <div class="kv"><span class="k">最近更新</span>${fmtDate(d.updated_at)}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">执行进度</div>
+          <div class="kv"><span class="k">行动项数</span>${d.action_item_count} 项</div>
+          <div class="kv"><span class="k">完成率</span>
+            <div class="progress ${d.action_item_completion_rate >= 100 ? 'done' : ''}" style="flex:1;max-width:160px;margin-left:8px"><span style="width:${d.action_item_completion_rate}%"></span></div>
+            <span>${d.action_item_completion_rate}%</span>
+          </div>
+          <div class="kv"><span class="k">是否逾期</span>${d.is_overdue ? '<span class="overdue-flag">是</span>' : '<span class="muted">否</span>'}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">状态流转时间线</div>
+          <div class="timeline">${d.status_logs.map(l => `<div class="tl-item status">
+            <div class="tl-desc"><strong>${escapeHtml(l.to_status || '-')}</strong>${l.remark ? '：' + escapeHtml(l.remark) : ''}</div>
+            <div class="tl-meta">${l.name ? escapeHtml(l.name) + ' · ' : ''}${fmtDate(l.created_at)}${l.from_status ? '（' + escapeHtml(l.from_status) + ' → ' + escapeHtml(l.to_status) + '）' : ''}</div>
+          </div>`).join('')}</div>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('editDc').onclick = () => decisionForm(d, d.meeting_id);
+  document.getElementById('changeStatusBtn').onclick = () => decisionStatusModal(d);
+  document.getElementById('batchAiBtn').onclick = () => batchActionItemsModal(d);
+  document.getElementById('linkAiBtn').onclick = () => linkActionItemModal(d);
+  document.getElementById('postDcCmt').onclick = async () => {
+    if (!dcCmtInput.value.trim()) return;
+    await api('/decisions/' + id + '/comments', { method: 'POST', body: { user_id: ME.id, content: dcCmtInput.value.trim() } });
+    viewDecisionDetail(id);
+  };
+}
+
+function decisionStatusModal(d) {
+  openModal('状态变更', `
+    <div class="form-row"><label>目标状态</label><select id="dsStatus">${DECISION_STATUSES.map(s => `<option ${d.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+    <div class="form-row"><label>备注说明</label><textarea id="dsRemark" rows="3" placeholder="状态变更的原因或说明"></textarea></div>
+  `, `<button class="btn" data-close="1">取消</button><button class="btn primary" id="saveDs">确认变更</button>`);
+  document.getElementById('saveDs').onclick = async () => {
+    try {
+      await api('/decisions/' + d.id + '/status', { method: 'POST', body: { status: dsStatus.value, user_id: ME.id, remark: dsRemark.value } });
+      toast('状态已更新', 'success');
+      closeModal();
+      viewDecisionDetail(d.id);
+    } catch (e) { toast(e.message, 'error'); }
+  };
+}
+
+let batchAiList = [];
+function batchActionItemsModal(d) {
+  batchAiList = [{ title: '', owner_id: null, due_date: '', priority: d.priority }];
+  const renderList = () => {
+    document.getElementById('baList').innerHTML = batchAiList.map((it, idx) => `
+      <div class="row ai-row" style="gap:6px;margin-bottom:8px;align-items:flex-start;flex-wrap:wrap">
+        <input class="ba-title" value="${escapeHtml(it.title)}" placeholder="行动项标题" style="flex:1;min-width:180px" data-idx="${idx}" />
+        <select class="ba-owner" style="max-width:130px" data-idx="${idx}">
+          <option value="">负责人</option>${USERS.map(u => `<option value="${u.id}" ${it.owner_id === u.id ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
+        </select>
+        <input class="ba-due" type="date" value="${it.due_date || ''}" style="max-width:140px" data-idx="${idx}" />
+        <select class="ba-pri" style="max-width:90px" data-idx="${idx}">${PRIORITIES.map(p => `<option ${it.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>
+        <button class="btn sm danger" data-idx="${idx}">✕</button>
+      </div>
+    `).join('');
+    document.querySelectorAll('#baList .ai-row input, #baList .ai-row select').forEach(el => {
+      el.addEventListener('input', () => {
+        const idx = Number(el.dataset.idx);
+        if (el.classList.contains('ba-title')) batchAiList[idx].title = el.value;
+        if (el.classList.contains('ba-owner')) batchAiList[idx].owner_id = Number(el.value) || null;
+        if (el.classList.contains('ba-due')) batchAiList[idx].due_date = el.value || null;
+        if (el.classList.contains('ba-pri')) batchAiList[idx].priority = el.value;
+      });
+    });
+    document.querySelectorAll('#baList .ai-row button[data-idx]').forEach(b => {
+      b.onclick = () => { batchAiList.splice(Number(b.dataset.idx), 1); renderList(); };
+    });
+  };
+  openModal('拆解为行动项', `
+    <p class="muted" style="font-size:12px;margin-bottom:12px">将决议拆解为具体行动项，自动关联到本决议。</p>
+    <div id="baList"></div>
+    <button class="btn sm" id="addBa" style="margin-top:8px">+ 添加行动项</button>
+  `, `<button class="btn" data-close="1">取消</button><button class="btn primary" id="saveBa">生成行动项</button>`, 'lg');
+  renderList();
+  document.getElementById('addBa').onclick = () => {
+    batchAiList.push({ title: '', owner_id: null, due_date: '', priority: d.priority });
+    renderList();
+  };
+  document.getElementById('saveBa').onclick = async () => {
+    const items = batchAiList.filter(i => i.title.trim());
+    if (!items.length) return toast('请至少填写一个行动项', 'error');
+    try {
+      const r = await api('/decisions/' + d.id + '/action-items/batch-create', { method: 'POST', body: { items, user_id: ME.id } });
+      toast('已生成 ' + r.created + ' 条行动项', 'success');
+      closeModal();
+      viewDecisionDetail(d.id);
+    } catch (e) { toast(e.message, 'error'); }
+  };
+}
+
+function linkActionItemModal(d) {
+  openModal('关联现有行动项', `
+    <div class="form-row"><label>选择行动项</label><select id="laSel" style="width:100%"><option value="">加载中…</option></select></div>
+  `, `<button class="btn" data-close="1">取消</button><button class="btn primary" id="saveLa">关联</button>`);
+  api('/action-items').then(items => {
+    const sel = document.getElementById('laSel');
+    const linkedIds = (d.action_items || []).map(a => a.id);
+    const available = items.filter(i => !linkedIds.includes(i.id));
+    sel.innerHTML = available.length ? available.map(i => `<option value="${i.id}">${escapeHtml(i.title)}（${i.owner ? i.owner.name : '未分配'}）</option>`).join('') : '<option value="">暂无可关联的行动项</option>';
+  });
+  document.getElementById('saveLa').onclick = async () => {
+    const aiId = Number(laSel.value);
+    if (!aiId) return toast('请选择行动项', 'error');
+    try {
+      await api('/decisions/' + d.id + '/action-items/' + aiId, { method: 'POST' });
+      toast('已关联', 'success');
+      closeModal();
+      viewDecisionDetail(d.id);
+    } catch (e) { toast(e.message, 'error'); }
+  };
+}
+
+async function unlinkActionItem(decisionId, actionItemId) {
+  if (!confirm('确认解除此行动项与决议的关联？')) return;
+  try {
+    await api('/decisions/' + decisionId + '/action-items/' + actionItemId, { method: 'DELETE' });
+    toast('已解除关联', 'success');
+    viewDecisionDetail(decisionId);
+  } catch (e) { toast(e.message, 'error'); }
+}

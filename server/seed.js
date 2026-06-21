@@ -4,7 +4,8 @@ function reset() {
   ['notifications', 'extension_requests', 'action_item_timeline',
    'action_item_comments', 'read_confirmations', 'minutes',
    'action_items', 'meeting_attendees', 'recurring_rules',
-   'meeting_template_attendees', 'meetings', 'meeting_templates', 'users'].forEach(t => {
+   'meeting_template_attendees', 'meetings', 'meeting_templates',
+   'decision_comments', 'decision_status_logs', 'decision_action_items', 'decisions', 'users'].forEach(t => {
     db.exec(`DELETE FROM ${t};`);
   });
   db.exec(`
@@ -213,7 +214,158 @@ function seed() {
   insExt.run(extReqItem._id, extReqItem.owner, '2026-06-10', '2026-06-20', '数据迁移涉及历史数据校验，需要额外测试时间。', '已批准', 6, '2026-06-09 10:00:00', '2026-06-08 09:00:00');
   insExt.run(actionItems.find(a => a.title === '测试自动化覆盖率提升到60%')._id, 4, '2026-06-15', '2026-06-30', '自动化框架升级，需重构用例。', '待审批', null, null, '2026-06-14 16:00:00');
 
-  console.log('Seed completed: 8 users, 12 meetings, 30 action items (+comments/timelines/extension requests).');
+  const decisions = [
+    {
+      title: '组件库升级联调完成', meeting: 1,
+      background: '前端组件库升级进度滞后，主要原因为接口联调阻塞，影响后续迭代计划。',
+      content: '组件库升级本周完成联调，由李娜总负责，王强配合后端接口联调。\n\n要求：\n- 本周四前完成所有接口联调\n- 周五提交回归测试\n- 确保向后兼容，不影响现有功能',
+      decision_maker: 1, impact_scope: '前端组、后端组', priority: '高',
+      effective_date: '2026-04-14', status: '已完成', risk: '接口变更可能影响其他业务线'
+    },
+    {
+      title: '订单服务性能优化', meeting: 1,
+      background: '后端订单服务压测 QPS 未达预期，存在大促时性能瓶颈风险。',
+      content: '订单服务本周五前完成性能优化，由王强负责。\n\n优化方向：\n- 数据库索引优化\n- 热点数据缓存\n- 异步处理非核心流程',
+      decision_maker: 1, impact_scope: '后端组', priority: '高',
+      effective_date: '2026-04-14', status: '已完成', risk: ''
+    },
+    {
+      title: '测试环境稳定性排查', meeting: 1,
+      background: '测试环境不稳定，频繁出现服务异常，影响回归测试效率。',
+      content: '测试环境稳定性由刘洋排查并给出整改方案。\n\n要求：\n- 定位根因\n- 输出环境部署规范\n- 建立监控告警',
+      decision_maker: 1, impact_scope: '测试部', priority: '中',
+      effective_date: '2026-04-14', status: '已完成', risk: ''
+    },
+    {
+      title: '接口向后兼容改造', meeting: 6,
+      background: '客户定制模块A 方案评审中提出接口需兼容旧版本，避免客户系统改造。',
+      content: '接口保持向后兼容，新增版本号参数。\n\n具体要求：\n- 保留原有接口逻辑\n- 新增 v2 版本接口\n- 编写迁移文档',
+      decision_maker: 6, impact_scope: '后端组、客户成功', priority: '高',
+      effective_date: '2026-05-21', status: '执行中', risk: '维护成本增加，需评估长期影响'
+    },
+    {
+      title: '权限模型精简为3类角色', meeting: 6,
+      background: '原权限模型过于复杂，客户上手成本高，需简化设计。',
+      content: '权限模型精简为管理员、普通用户、只读用户 3 类角色。\n\n工作内容：\n- 梳理角色权限矩阵\n- 前端页面适配\n- 数据库表结构调整',
+      decision_maker: 1, impact_scope: '产品部、研发部', priority: '中',
+      effective_date: '2026-05-21', status: '已确认', risk: '部分客户定制权限可能受影响'
+    },
+    {
+      title: '看板指标卡片拖拽实现', meeting: 7,
+      background: '数据看板需求评审通过，看板需支持自定义指标卡片的拖拽布局。',
+      content: '支持指标卡片拖拽排序与布局调整。\n\n技术方案：\n- 前端使用拖拽库实现\n- 布局配置存本地存储\n- 后续考虑云端同步',
+      decision_maker: 1, impact_scope: '前端组', priority: '高',
+      effective_date: '2026-06-06', status: '执行中', risk: '拖拽交互可能影响移动端体验'
+    },
+    {
+      title: '建立跨团队周例会机制', meeting: 8,
+      background: 'Q2 复盘发现跨团队协作流程不畅，信息同步不及时，导致部分项目延期。',
+      content: '建立跨团队周例会机制，每周一上午同步各团队进度与风险。\n\n会议安排：\n- 时间：每周一 10:00-10:30\n- 参与人：各团队负责人\n- 产出：会议纪要与风险清单',
+      decision_maker: 6, impact_scope: '全公司', priority: '高',
+      effective_date: '2026-06-19', status: '执行中', risk: '会议时间可能与其他安排冲突'
+    },
+    {
+      title: '测试自动化覆盖率提升到60%', meeting: 8,
+      background: 'Q2 测试自动化率偏低，回归测试人力投入大，效率不高。',
+      content: 'Q3 测试自动化覆盖率提升到 60%。\n\n实施计划：\n- 引入自动化测试框架\n- 优先覆盖核心业务流程\n- 建立 CI 流水线集成',
+      decision_maker: 6, impact_scope: '测试部', priority: '高',
+      effective_date: '2026-06-19', status: '执行中', risk: '用例维护成本可能较高'
+    },
+    {
+      title: '数据看板 Q3 初完成', meeting: 8,
+      background: 'Q2 数据看板交付延迟，需纳入 Q3 重点跟进。',
+      content: '数据看板 Q3 初完成 MVP 版本。\n\n里程碑：\n- 7月：需求确认与原型设计\n- 8月：开发联调\n- 9月：测试上线',
+      decision_maker: 1, impact_scope: '产品部、研发部', priority: '中',
+      effective_date: '2026-06-19', status: '已确认', risk: '人力不足可能影响交付'
+    },
+    {
+      title: '补建订单索引', meeting: 9,
+      background: '5.26 上线问题复盘发现订单导出超时，根因为 SQL 未走索引。',
+      content: '补建订单索引并加监控。\n\n行动项：\n- 评估并创建必要索引\n- 上线慢 SQL 监控告警\n- 建立上线前 SQL 审核流程',
+      decision_maker: 6, impact_scope: '后端组', priority: '高',
+      effective_date: '2026-05-29', status: '已完成', risk: '索引创建可能影响写入性能'
+    },
+    {
+      title: '建立上线前慢 SQL 检查清单', meeting: 9,
+      background: '为避免类似性能问题再次发生，需建立上线前 SQL 审核机制。',
+      content: '建立上线前慢 SQL 检查清单，纳入发布流程。\n\n清单内容：\n- 核心 SQL 执行计划检查\n- 大数据量场景评估\n- 索引覆盖验证',
+      decision_maker: 4, impact_scope: '测试部、后端组', priority: '中',
+      effective_date: '2026-05-29', status: '已完成', risk: ''
+    },
+    {
+      title: '发布支付热修复', meeting: 12,
+      background: '支付回调偶发失败，影响范围约 2% 订单，需紧急修复。',
+      content: '当晚发布热修复，增加回调重试与告警。\n\n修复方案：\n- 增加 3 次重试机制\n- 增加失败告警通知\n- 后续优化幂等处理',
+      decision_maker: 6, impact_scope: '后端组', priority: '高',
+      effective_date: '2026-06-17', status: '已完成', risk: '热修复回归风险'
+    },
+    {
+      title: '增加回调重试与告警', meeting: 12,
+      background: '支付回调偶发失败，需从架构层面提升可靠性。',
+      content: '增加支付回调重试与告警机制。\n\n具体工作：\n- 实现指数退避重试\n- 接入告警平台\n- 输出可靠性报告',
+      decision_maker: 3, impact_scope: '后端组、运维', priority: '高',
+      effective_date: '2026-06-18', status: '执行中', risk: '重试可能导致重复回调，需确保幂等'
+    },
+    {
+      title: '客户定制模块按优先级排期', meeting: 3,
+      background: '6 月需交付三个客户定制模块，人力紧张，需按优先级排序。',
+      content: '客户定制模块按优先级排期，明确交付顺序。\n\n排期原则：\n- 按客户重要度排序\n- 按合同交付日期排序\n- 评估人力缺口并协调',
+      decision_maker: 6, impact_scope: '项目部、研发部', priority: '高',
+      effective_date: '2026-06-02', status: '已完成', risk: ''
+    },
+    {
+      title: '数据看板需求本周确认', meeting: 3,
+      background: '数据看板需求待确认，影响后续排期。',
+      content: '数据看板需求本周内确认，下周一启动开发。\n\n确认事项：\n- 核心指标清单\n- 交互原型\n- 数据来源确认',
+      decision_maker: 1, impact_scope: '产品部、客户', priority: '高',
+      effective_date: '2026-06-02', status: '已完成', risk: ''
+    }
+  ];
+
+  const insDec = db.prepare(`INSERT INTO decisions (title,background,content,decision_maker_id,impact_scope,priority,effective_date,meeting_id,minutes_id,status,risk,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const insDecLog = db.prepare(`INSERT INTO decision_status_logs (decision_id,from_status,to_status,operator_id,remark,created_at) VALUES (?,?,?,?,?,?)`);
+  const insDecComment = db.prepare(`INSERT INTO decision_comments (decision_id,user_id,content,created_at) VALUES (?,?,?,?)`);
+  const insDecAi = db.prepare(`INSERT OR IGNORE INTO decision_action_items (decision_id,action_item_id) VALUES (?,?)`);
+
+  decisions.forEach((d, idx) => {
+    const meeting = meetings[d.meeting - 1];
+    const created = meeting.start.replace(' ', ' ') + ':00';
+    const res = insDec.run(
+      d.title, d.background, d.content, d.decision_maker,
+      d.impact_scope, d.priority, d.effective_date,
+      meeting._id, meeting._minutesId, d.status, d.risk, created, created
+    );
+    const did = res.lastInsertRowid;
+    d._id = did;
+
+    if (d.status === '草稿') {
+      insDecLog.run(did, null, '草稿', d.decision_maker, '决议创建', created);
+    } else if (d.status === '已确认') {
+      insDecLog.run(did, null, '草稿', d.decision_maker, '决议创建', created);
+      insDecLog.run(did, '草稿', '已确认', d.decision_maker, '评审通过，正式确认', created);
+    } else if (d.status === '执行中') {
+      insDecLog.run(did, null, '草稿', d.decision_maker, '决议创建', created);
+      insDecLog.run(did, '草稿', '已确认', d.decision_maker, '评审通过', created);
+      insDecLog.run(did, '已确认', '执行中', d.decision_maker, '开始执行落地', created);
+    } else if (d.status === '已完成') {
+      insDecLog.run(did, null, '草稿', d.decision_maker, '决议创建', created);
+      insDecLog.run(did, '草稿', '已确认', d.decision_maker, '评审通过', created);
+      insDecLog.run(did, '已确认', '执行中', d.decision_maker, '开始执行', created);
+      insDecLog.run(did, '执行中', '已完成', d.decision_maker, '所有行动项已完成', created);
+    }
+
+    const relatedItems = actionItems.filter(a => a.meeting === d.meeting && a.title.includes(d.title.slice(0, 4)));
+    relatedItems.slice(0, 2).forEach(a => {
+      insDecAi.run(did, a._id);
+    });
+
+    if (idx % 4 === 0) {
+      insDecComment.run(did, d.decision_maker === 1 ? 2 : 1, '收到，马上安排跟进。', created);
+      insDecComment.run(did, d.decision_maker, '好的，有问题随时同步。', created);
+    }
+  });
+
+  console.log('Seed completed: 8 users, 12 meetings, 30 action items, 15 decisions (+status logs/comments/action item links).');
 }
 
 if (require.main === module) {

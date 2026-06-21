@@ -196,6 +196,35 @@ function createMeetingFromTemplate(templateId, startTime, recurringRuleId, opts)
   return meetingId;
 }
 
+function enrichDecision(d) {
+  if (!d) return d;
+  d.decision_maker = d.decision_maker_id ? getUser(d.decision_maker_id) : null;
+  if (d.meeting_id) {
+    d.meeting = db.prepare('SELECT id,title,type,start_time FROM meetings WHERE id=?').get(d.meeting_id);
+  } else {
+    d.meeting = null;
+  }
+  const actionItems = db.prepare(`
+    SELECT ai.* FROM action_items ai
+    JOIN decision_action_items dai ON dai.action_item_id = ai.id
+    WHERE dai.decision_id = ?
+    ORDER BY ai.created_at DESC
+  `).all(d.id).map(enrichActionItem);
+  d.action_items = actionItems;
+  d.action_item_count = actionItems.length;
+  const completedItems = actionItems.filter(i => i.status === '已完成');
+  const validItems = actionItems.filter(i => i.status !== '取消');
+  d.action_item_completion_rate = validItems.length ? Math.round((completedItems.length / validItems.length) * 100) : 0;
+  d.is_overdue = actionItems.some(i => i.is_overdue && i.status !== '已完成' && i.status !== '取消');
+  return d;
+}
+
+function addDecisionStatusLog(decisionId, fromStatus, toStatus, operatorId, remark) {
+  db.prepare(`INSERT INTO decision_status_logs (decision_id,from_status,to_status,operator_id,remark) VALUES (?,?,?,?,?)`)
+    .run(decisionId, fromStatus || null, toStatus, operatorId || null, remark || null);
+  db.prepare(`UPDATE decisions SET updated_at=datetime('now') WHERE id=?`).run(decisionId);
+}
+
 module.exports = {
   getUser,
   resolveCollaborators,
@@ -210,5 +239,7 @@ module.exports = {
   renderMinutesTemplate,
   generateRecurringDates,
   createMeetingFromTemplate,
-  touchTemplate
+  touchTemplate,
+  enrichDecision,
+  addDecisionStatusLog
 };

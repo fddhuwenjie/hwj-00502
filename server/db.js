@@ -168,6 +168,56 @@ function initSchema() {
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (template_id) REFERENCES meeting_templates(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS decisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      background TEXT,
+      content TEXT,
+      decision_maker_id INTEGER,
+      impact_scope TEXT,
+      priority TEXT DEFAULT '中',
+      effective_date TEXT,
+      meeting_id INTEGER,
+      minutes_id INTEGER,
+      status TEXT DEFAULT '草稿',
+      risk TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (decision_maker_id) REFERENCES users(id),
+      FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE SET NULL,
+      FOREIGN KEY (minutes_id) REFERENCES minutes(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS decision_status_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      decision_id INTEGER NOT NULL,
+      from_status TEXT,
+      to_status TEXT NOT NULL,
+      operator_id INTEGER,
+      remark TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (decision_id) REFERENCES decisions(id) ON DELETE CASCADE,
+      FOREIGN KEY (operator_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS decision_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      decision_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      content TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (decision_id) REFERENCES decisions(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS decision_action_items (
+      decision_id INTEGER NOT NULL,
+      action_item_id INTEGER NOT NULL,
+      PRIMARY KEY (decision_id, action_item_id),
+      FOREIGN KEY (decision_id) REFERENCES decisions(id) ON DELETE CASCADE,
+      FOREIGN KEY (action_item_id) REFERENCES action_items(id) ON DELETE CASCADE
+    );
   `);
 
   const meetingsCols = db.prepare(`PRAGMA table_info(meetings)`).all().map(c => c.name);
@@ -182,6 +232,7 @@ function initSchema() {
 const MEETING_TYPES = ['周会', '评审', '复盘', '客户会议', '临时会议'];
 const PRIORITIES = ['高', '中', '低'];
 const STATUSES = ['待开始', '进行中', '已完成', '延期', '取消'];
+const DECISION_STATUSES = ['草稿', '已确认', '执行中', '已完成', '已废弃'];
 const RECURRENCE_FREQUENCIES = ['weekly', 'biweekly', 'monthly', 'monthly_first_workday'];
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
@@ -200,6 +251,7 @@ module.exports = {
   MEETING_TYPES,
   PRIORITIES,
   STATUSES,
+  DECISION_STATUSES,
   RECURRENCE_FREQUENCIES,
   WEEKDAYS,
   isOverdue,

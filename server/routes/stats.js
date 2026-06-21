@@ -1,6 +1,6 @@
 const express = require('express');
 const { db, MEETING_TYPES, STATUSES } = require('../db');
-const { enrichActionItem, ensureOverdueNotifications } = require('../helpers');
+const { enrichActionItem, ensureOverdueNotifications, enrichDecision } = require('../helpers');
 
 const router = express.Router();
 
@@ -36,6 +36,18 @@ router.get('/overview', (req, res) => {
   });
   const monthlyTrend = Object.keys(monthlyMap).sort().map(mo => ({ month: mo, count: monthlyMap[mo] }));
 
+  const decisions = db.prepare(`SELECT * FROM decisions`).all().map(enrichDecision);
+  const monthlyDecisions = decisions.filter(d => d.created_at.startsWith(ym));
+  const inProgressDecisions = decisions.filter(d => d.status === '执行中');
+  const validDecisions = decisions.filter(d => d.status !== '已废弃');
+  const completedDecisions = decisions.filter(d => d.status === '已完成');
+  const overdueDecisions = decisions.filter(d => d.is_overdue);
+  const decisionCompletionRate = validDecisions.length ? Math.round((completedDecisions.length / validDecisions.length) * 100) : 0;
+  const decisionByMeetingType = MEETING_TYPES.reduce((acc, t) => {
+    acc[t] = decisions.filter(d => d.meeting && d.meeting.type === t).length;
+    return acc;
+  }, {});
+
   res.json({
     month: ym,
     monthly_meetings: monthlyMeetings.length,
@@ -47,7 +59,16 @@ router.get('/overview', (req, res) => {
     overdue_count: overdueItems.length,
     overdue_rate: overdueRate,
     meeting_type_ratio: typeRatio,
-    monthly_trend: monthlyTrend
+    monthly_trend: monthlyTrend,
+    decisions: {
+      total: decisions.length,
+      monthly_new: monthlyDecisions.length,
+      in_progress: inProgressDecisions.length,
+      completed: completedDecisions.length,
+      overdue: overdueDecisions.length,
+      completion_rate: decisionCompletionRate,
+      by_meeting_type: decisionByMeetingType
+    }
   });
 });
 

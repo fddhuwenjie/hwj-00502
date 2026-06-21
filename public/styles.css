@@ -149,6 +149,11 @@ table.tbl tr:last-child td { border-bottom: none; }
 .badge.st-已完成 { background: var(--success-soft); color: var(--success); }
 .badge.st-延期 { background: #fff5f5; color: var(--danger); }
 .badge.st-取消 { background: #f1f3f5; color: #868e96; text-decoration: line-through; }
+.badge.dst-草稿 { background: #e9ecef; color: #495057; }
+.badge.dst-已确认 { background: #eef2ff; color: #4f6df5; }
+.badge.dst-执行中 { background: #fff4e6; color: #f08c00; }
+.badge.dst-已完成 { background: #e6fcf5; color: #0ca678; }
+.badge.dst-已废弃 { background: #f1f3f5; color: #868e96; text-decoration: line-through; }
 .overdue-flag { color: var(--danger); font-weight: 700; }
 
 .avatar {
@@ -256,3 +261,13 @@ table.tbl tr:last-child td { border-bottom: none; }
 .pk-row { padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: .15s; font-size: 13px; }
 .pk-row:hover { border-color: var(--primary); background: var(--primary-soft); }
 .ai-row input, .ai-row select { font-size: 13px; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+
+.risk-box {
+  background: #fff4e6;
+  border-left: 4px solid var(--warn);
+  padding: 12px 14px;
+  border-radius: 0 8px 8px 0;
+  font-size: 13px;
+  color: #8a5a00;
+  line-height: 1.7;
+}

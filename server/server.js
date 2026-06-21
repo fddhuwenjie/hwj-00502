@@ -17,6 +17,7 @@ const actionItemsRouter = require('./routes/actionItems');
 const usersRouter = require('./routes/users');
 const statsRouter = require('./routes/stats');
 const templatesRouter = require('./routes/templates');
+const decisionsRouter = require('./routes/decisions');
 
 const api = express();
 api.use(cors());
@@ -30,6 +31,7 @@ api.use('/api/action-items', actionItemsRouter);
 api.use('/api/users', usersRouter);
 api.use('/api/stats', statsRouter);
 api.use('/api/templates', templatesRouter);
+api.use('/api/decisions', decisionsRouter);
 
 api.use((err, req, res, next) => {
   console.error(err);
