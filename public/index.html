@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>会议纪要中心 · 行动项追踪</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">M</div>
+      <div>
+        <div class="brand-title">会议纪要中心</div>
+        <div class="brand-sub">Meeting Minutes &amp; Action Tracker</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <a href="#/dashboard" data-route="dashboard">仪表盘</a>
+      <a href="#/meetings" data-route="meetings">会议管理</a>
+      <a href="#/actions" data-route="actions">行动项</a>
+      <a href="#/search" data-route="search">检索归档</a>
+      <a href="#/people" data-route="people">人员视图</a>
+    </nav>
+    <div class="topbar-right">
+      <div class="notif" id="notifBtn" title="逾期通知">
+        <span class="bell">🔔</span>
+        <span class="badge-dot" id="notifDot" hidden></span>
+      </div>
+      <div class="notif-panel" id="notifPanel" hidden></div>
+      <label class="me-picker">
+        <span class="me-label">当前身份</span>
+        <select id="meSelect"></select>
+      </label>
+    </div>
+  </header>
+  <main id="app" class="app"></main>
+  <div class="toast-wrap" id="toastWrap"></div>
+  <div class="modal-root" id="modalRoot"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
